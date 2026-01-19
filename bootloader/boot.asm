@@ -63,27 +63,36 @@ enable_a20:
 
 load_kernel:
     push es                 ; preserve ES
+    push ax                 ; preserve AX
 
     ; RESET DISK SYSTEM (MANDATORY)
     mov ah, 0x00
     mov dl, [boot_drive]
     int 0x13
+    jc disk_error           ; if reset fails, error
 
+    ; Set up destination segment:offset
     mov ax, KERNEL_LOAD_SEG
     mov es, ax
     xor bx, bx              ; ES:BX = 0x10000 (64 KB)
 
-    mov ah, 0x02            ; BIOS read sectors (CHS)
-    mov al, KERNEL_SECTORS  ; number of sectors
+    ; Read sectors using CHS addressing
+    mov ah, 0x02            ; BIOS read sectors function
+    mov al, KERNEL_SECTORS  ; number of sectors to read
     mov ch, 0x00            ; cylinder 0
     mov cl, 0x02            ; sector 2 (boot sector is sector 1)
     mov dh, 0x00            ; head 0
-    mov dl, [boot_drive]    ; correct boot drive
+    mov dl, [boot_drive]    ; drive number
 
     int 0x13
     jc disk_error           ; if CF set → error
 
-    pop es
+    ; Verify that we read the expected number of sectors
+    cmp al, KERNEL_SECTORS
+    jne disk_error          ; if AL != expected sectors → error
+
+    pop ax                  ; restore AX
+    pop es                  ; restore ES
     ret
 
 disk_error:
