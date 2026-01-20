@@ -1,5 +1,10 @@
 KERNEL_LOAD_SEG equ 0x1000
+KERNEL_LOAD_OFF equ 0x0000
 KERNEL_SECTORS  equ 4        ; small kernel for now
+
+; Segment selectors (after GDT is loaded)
+CODE_SEG equ 0x08    ; Index 1 in GDT (Kernel Code)
+DATA_SEG equ 0x10    ; Index 2 in GDT (Kernel Data)
 
 ; Tell assembler this is a 16 bit real mode code
 BITS 16
@@ -27,6 +32,11 @@ start:
     ; load kernel into memory
     call load_kernel
 
+    ; setup GDT and switch to protected mode
+    call setup_gdt
+    call switch_to_protected_mode
+
+    ; This should never be reached (we jump to protected mode)
 .halt:
     cli
     hlt
@@ -102,6 +112,100 @@ disk_error:
     cli
     hlt
     jmp .hang
+
+; ============================
+; Setup GDT (Global Descriptor Table)
+; ============================
+
+setup_gdt:
+    cli                     ; Disable interrupts during setup
+    lgdt [gdt_descriptor]   ; Load GDT pointer into GDTR register
+    ret
+
+; ============================
+; Switch to Protected Mode
+; ============================
+
+switch_to_protected_mode:
+    ; Enable protected mode by setting bit 0 of CR0
+    mov eax, cr0
+    or eax, 1               ; Set PE (Protection Enable) bit
+    mov cr0, eax
+
+    ; Far jump to 32-bit code segment to flush pipeline
+    ; This is CRITICAL - CPU needs to know we're in 32-bit mode
+    jmp CODE_SEG:protected_mode_start
+
+; ============================
+; Protected Mode Entry (32-bit code)
+; ============================
+
+BITS 32
+
+protected_mode_start:
+    ; Reload all segment registers with data segment selector
+    mov ax, DATA_SEG
+    mov ds, ax
+    mov ss, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; Setup stack pointer (grows downward from high memory)
+    mov esp, 0x90000        ; Stack at 576 KB (safe area)
+
+    ; Jump to kernel entry point
+    ; Kernel is loaded at 0x10000 (flat address in protected mode)
+    ; In flat memory model, we can jump directly to the address
+    mov eax, 0x10000
+    jmp eax                 ; Jump to kernel
+
+    ; If kernel returns (shouldn't happen), halt
+.halt:
+    cli
+    hlt
+    jmp .halt
+
+; ============================
+; GDT (Global Descriptor Table)
+; ============================
+
+BITS 16
+
+gdt_start:
+    ; NULL Descriptor (required - must be first)
+    ; All zeros
+    dd 0x00000000
+    dd 0x00000000
+
+    ; Kernel Code Segment (Index 1)
+    ; Base: 0x00000000, Limit: 0xFFFFFFFF
+    ; Access: Present, Ring 0, Code, Readable
+    ; Flags: 4KB granularity, 32-bit mode
+    dw 0xFFFF       ; Limit (bits 0-15)
+    dw 0x0000       ; Base (bits 0-15)
+    db 0x00         ; Base (bits 16-23)
+    db 0x9A         ; Access byte: Present(1) + DPL(00) + Code(1) + Readable(1)
+    db 0xCF         ; Flags: Granularity(1) + 32-bit(1) + Limit (bits 16-19 = 0xF)
+    db 0x00         ; Base (bits 24-31)
+
+    ; Kernel Data Segment (Index 2)
+    ; Base: 0x00000000, Limit: 0xFFFFFFFF
+    ; Access: Present, Ring 0, Data, Writable
+    ; Flags: 4KB granularity, 32-bit mode
+    dw 0xFFFF       ; Limit (bits 0-15)
+    dw 0x0000       ; Base (bits 0-15)
+    db 0x00         ; Base (bits 16-23)
+    db 0x92         ; Access byte: Present(1) + DPL(00) + Data(0) + Writable(1)
+    db 0xCF         ; Flags: Granularity(1) + 32-bit(1) + Limit (bits 16-19 = 0xF)
+    db 0x00         ; Base (bits 24-31)
+
+gdt_end:
+
+; GDT Descriptor (pointer structure for LGDT instruction)
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1  ; Size of GDT - 1 (CPU quirk)
+    dd gdt_start                 ; Physical address of GDT
 
 ; ============================
 ; Data
