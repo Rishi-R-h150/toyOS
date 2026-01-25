@@ -1,6 +1,6 @@
 KERNEL_LOAD_SEG equ 0x1000
 KERNEL_LOAD_OFF equ 0x0000
-KERNEL_SECTORS  equ 4        ; small kernel for now
+KERNEL_SECTORS  equ 20       ; kernel size (increased for actual kernel size)
 
 ; Segment selectors (after GDT is loaded)
 CODE_SEG equ 0x08    ; Index 1 in GDT (Kernel Code)
